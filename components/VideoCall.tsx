@@ -1,141 +1,181 @@
-'use client';
-
-import { useState, useEffect, useRef } from 'react';
-import Peer from 'simple-peer';
-import { sendSignalToPeer, receiveSignalFromPeer } from '@/utils/signaling';
-
-type PeerConnection = Peer.Instance | null;
+import React, { useState, useEffect, useRef } from 'react';
+import { createClient } from '@/utils/supabase/client';
 
 interface VideoCallProps {
-  currentUserId: string;
-  otherUserId: string;
-  roomId: string;  // Add roomId to identify the room
+  roomId: string;
+  userId: string;
 }
 
-export default function VideoCall({ currentUserId, otherUserId, roomId }: VideoCallProps) {
-  const [isInCall, setIsInCall] = useState<boolean>(false);
-  const [peer, setPeer] = useState<PeerConnection>(null);
-  const [otherPeer, setOtherPeer] = useState<PeerConnection>(null);
+const VideoCall: React.FC<VideoCallProps> = ({ roomId, userId }) => {
+  const [localStream, setLocalStream] = useState<MediaStream | null>(null);
+  const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
+  const [peerConnection, setPeerConnection] = useState<RTCPeerConnection | null>(null);
 
-  const localVideoRef = useRef<HTMLVideoElement | null>(null);
-  const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
+  const localVideoRef = useRef<HTMLVideoElement>(null);
+  const remoteVideoRef = useRef<HTMLVideoElement>(null);
 
-  // Send signal to the other peer (offer/answer)
-  const sendSignal = (signalData: any) => {
-    sendSignalToPeer(signalData, roomId);
-  };
+  // Supabase client setup (replace with your actual Supabase credentials)
+  const supabase = createClient();
 
-  // Accept the incoming call when the answer is received
-  const acceptCall = (signalData: any) => {
-    const incomingPeer = new Peer({
-      initiator: false,
-      trickle: false,
-      stream: localVideoRef.current?.srcObject as MediaStream,
-    });
+  // ICE server configuration
+  const iceServers = [
+    { urls: 'stun:stun.l.google.com:19302' }
+    // { 
+    //   urls: 'turn:your-turn-server.com',
+    //   username: 'your-username',
+    //   credential: 'your-password'
+    // }
+  ];
 
-    incomingPeer.on('signal', (signalData) => {
-      sendSignal(signalData);  // Send back the signal (answer)
-    });
-
-    incomingPeer.on('stream', (remoteStream) => {
-      if (remoteVideoRef.current) {
-        remoteVideoRef.current.srcObject = remoteStream;
-      }
-    });
-
-    incomingPeer.signal(signalData);  // Signal data from the calling peer
-    setOtherPeer(incomingPeer);
-  };
-
-  const startCall = async () => {
-    const localPeer = new Peer({
-      initiator: true,
-      trickle: false,
-      stream: localVideoRef.current?.srcObject as MediaStream,
-    });
-
-    localPeer.on('signal', (signalData) => {
-      sendSignal(signalData);  // Send offer to the other peer
-    });
-
-    localPeer.on('stream', (remoteStream) => {
-      if (remoteVideoRef.current) {
-        remoteVideoRef.current.srcObject = remoteStream;
-      }
-    });
-
-    setPeer(localPeer);
-  };
-
-  const endCall = () => {
-    if (peer) peer.destroy();
-    if (otherPeer) otherPeer.destroy();
-    setIsInCall(false);
-  };
-
-  // Get the user's media stream (video + audio)
+  // Initialize local media stream
   useEffect(() => {
-    const getUserMedia = async () => {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: true,
-        audio: true,
-      });
-      if (localVideoRef.current) {
-        localVideoRef.current.srcObject = stream;
+    const initializeLocalStream = async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: true,
+          audio: true
+        });
+        setLocalStream(stream);
+        
+        if (localVideoRef.current) {
+          localVideoRef.current.srcObject = stream;
+        }
+      } catch (error) {
+        console.error('Error accessing media devices:', error);
       }
     };
 
-    getUserMedia();
-
-    return () => {
-      if (localVideoRef.current) {
-        const mediaStream = localVideoRef.current.srcObject as MediaStream;
-        mediaStream?.getTracks().forEach((track) => track.stop());
-      }
-    };
+    initializeLocalStream();
   }, []);
 
-  // Automatically start the call once both users are matched
+  // Set up peer connection
   useEffect(() => {
-    if (currentUserId && otherUserId) {
-      startCall();
-      receiveSignalFromPeer(acceptCall, roomId);  // Listen for incoming calls
+    const createPeerConnection = () => {
+      const pc = new RTCPeerConnection({ iceServers });
+      
+      // Add local stream tracks to peer connection
+      if (localStream) {
+        localStream.getTracks().forEach(track => {
+          pc.addTrack(track, localStream);
+        });
+      }
+
+      // Handle incoming remote tracks
+      pc.ontrack = (event) => {
+        const [remoteStream] = event.streams;
+        setRemoteStream(remoteStream);
+        
+        if (remoteVideoRef.current) {
+          remoteVideoRef.current.srcObject = remoteStream;
+        }
+      };
+
+      // Handle ICE candidate generation
+      pc.onicecandidate = (event) => {
+        if (event.candidate) {
+          // Send ICE candidate to the other peer via Supabase
+          supabase
+            .from('room_signals')
+            .insert({
+              room_id: roomId,
+              user_id: userId,
+              type: 'ice-candidate',
+              payload: JSON.stringify(event.candidate)
+            });
+        }
+      };
+
+      setPeerConnection(pc);
+      return pc;
+    };
+
+    const pc = createPeerConnection();
+
+    // Listen for signaling messages
+    const signalSubscription = supabase
+      .channel(`room:${roomId}`)
+      .on('broadcast', { event: 'signal' }, async (payload) => {
+        const signal = JSON.parse(payload.payload);
+        
+        if (signal.type === 'offer') {
+          await pc.setRemoteDescription(new RTCSessionDescription(signal.offer));
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+          
+          // Send answer back to the other peer
+          supabase
+            .from('room_signals')
+            .insert({
+              room_id: roomId,
+              user_id: userId,
+              type: 'answer',
+              payload: JSON.stringify(answer)
+            });
+        } else if (signal.type === 'answer') {
+          await pc.setRemoteDescription(new RTCSessionDescription(signal.answer));
+        } else if (signal.type === 'ice-candidate') {
+          await pc.addIceCandidate(new RTCIceCandidate(signal.candidate));
+        }
+      })
+      .subscribe();
+
+    // Cleanup function
+    return () => {
+      pc.close();
+      localStream?.getTracks().forEach(track => track.stop());
+      signalSubscription.unsubscribe();
+    };
+  }, [localStream, roomId, userId]);
+
+  // Create and send offer
+  const createOffer = async () => {
+    if (!peerConnection) return;
+
+    try {
+      const offer = await peerConnection.createOffer();
+      await peerConnection.setLocalDescription(offer);
+
+      // Send offer via Supabase
+      supabase
+        .from('room_signals')
+        .insert({
+          room_id: roomId,
+          user_id: userId,
+          type: 'offer',
+          payload: JSON.stringify(offer)
+        });
+    } catch (error) {
+      console.error('Error creating offer:', error);
     }
-  }, [currentUserId, otherUserId, roomId]);
+  };
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-[100%] p-4">
-      <div className="flex space-x-4 mb-6 min-h-[100%]">
-        <div className="relative w-1/3">
-          <video
-            ref={localVideoRef}
-            autoPlay
-            muted
-            className="w-full rounded-lg shadow-lg border-2 border-gray-300"
-          />
-          <p className="absolute bottom-2 left-2 text-sm text-white">You</p>
-        </div>
-
-        <div className="relative w-2/3">
-          <video
-            ref={remoteVideoRef}
-            autoPlay
-            className="w-full rounded-lg shadow-lg border-2 border-gray-300"
-          />
-          <p className="absolute bottom-2 left-2 text-sm text-white">Remote</p>
-        </div>
+    <div className="video-call-container">
+      <div className="local-video">
+        <video 
+          ref={localVideoRef} 
+          autoPlay 
+          muted 
+          playsInline 
+          className="w-full h-full object-cover"
+        />
       </div>
-
-      <div className="flex justify-center gap-4 bg-white">
-        {isInCall && (
-          <button
-            onClick={endCall}
-            className="px-6 py-3 text-lg font-medium text-white bg-red-500 hover:bg-red-700 rounded-lg shadow-md"
-          >
-            End Call
-          </button>
-        )}
+      <div className="remote-video">
+        <video 
+          ref={remoteVideoRef} 
+          autoPlay 
+          playsInline 
+          className="w-full h-full object-cover"
+        />
       </div>
+      <button 
+        onClick={createOffer}
+        className="start-call-btn"
+      >
+        Start Call
+      </button>
     </div>
   );
-}
+};
+
+export default VideoCall;
