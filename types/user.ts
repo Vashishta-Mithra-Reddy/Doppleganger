@@ -6,7 +6,7 @@ export interface UserProfile {
   interests: string[];
   hobbies: string[];
   avatar_url?: string;
-  status: 'idle' | 'busy' | 'offline';
+  status: 'idle' | 'active' | 'busy';
   created_at: string;
   updated_at: string;
 }
