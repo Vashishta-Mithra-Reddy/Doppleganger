@@ -6,6 +6,12 @@ interface VideoCallProps {
   userId: string;
 }
 
+interface Signal {
+  type: 'offer' | 'answer' | 'ice-candidate';
+  sender: string;
+  payload: any;
+}
+
 const VideoCall: React.FC<VideoCallProps> = ({ roomId, userId }) => {
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
@@ -13,6 +19,7 @@ const VideoCall: React.FC<VideoCallProps> = ({ roomId, userId }) => {
   const [connectionState, setConnectionState] = useState<string>('');
   const [error, setError] = useState<string>('');
   const [isMediaSupported, setIsMediaSupported] = useState<boolean>(false);
+  const [isCaller, setIsCaller] = useState<boolean>(false);
 
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
@@ -103,6 +110,8 @@ const VideoCall: React.FC<VideoCallProps> = ({ roomId, userId }) => {
 
   // Set up peer connection
   useEffect(() => {
+    if (!localStream) return;
+
     const createPeerConnection = () => {
       console.log('Creating new RTCPeerConnection');
       const pc = new RTCPeerConnection({ iceServers });
@@ -120,13 +129,14 @@ const VideoCall: React.FC<VideoCallProps> = ({ roomId, userId }) => {
         console.log(`ICE gathering state: ${pc.iceGatheringState}`);
       };
 
-      if (localStream) {
-        console.log('Adding local stream tracks to peer connection');
-        localStream.getTracks().forEach(track => {
-          pc.addTrack(track, localStream);
-          console.log(`Added track: ${track.kind}`);
-        });
-      }
+      pc.onsignalingstatechange = () => {
+        console.log(`Signaling state: ${pc.signalingState}`);
+      };
+
+      localStream.getTracks().forEach(track => {
+        pc.addTrack(track, localStream);
+        console.log(`Added local track: ${track.kind}`);
+      });
 
       pc.ontrack = (event) => {
         console.log('Received remote track', event.streams[0].id);
@@ -143,17 +153,16 @@ const VideoCall: React.FC<VideoCallProps> = ({ roomId, userId }) => {
         if (event.candidate) {
           console.log('New ICE candidate:', event.candidate.candidate);
           try {
-            const { error } = await supabase
-              .from('room_signals')
-              .insert({
-                room_id: roomId,
-                user_id: userId,
+            const { error } = await supabase.from('room_signals').insert({
+              room_id: roomId,
+              user_id: userId,
+              type: 'ice-candidate',
+              payload: JSON.stringify({
                 type: 'ice-candidate',
-                payload: JSON.stringify({
-                  type: 'ice-candidate',
-                  candidate: event.candidate
-                })
-              });
+                sender: userId,
+                payload: event.candidate
+              })
+            });
             
             if (error) throw error;
             console.log('ICE candidate sent successfully');
@@ -163,78 +172,95 @@ const VideoCall: React.FC<VideoCallProps> = ({ roomId, userId }) => {
         }
       };
 
-      setPeerConnection(pc);
       return pc;
     };
 
-    const handleSignal = async (payload: any) => {
-      if (!peerConnection) return;
+    const pc = createPeerConnection();
+    setPeerConnection(pc);
 
-      try {
-        const signal = JSON.parse(payload.payload);
-        console.log('Received signal:', signal.type);
+    // Set up Supabase realtime subscription
+    console.log('Setting up realtime subscription...');
+    const subscription = supabase
+      .channel(`room:${roomId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'room_signals',
+          filter: `room_id=eq.${roomId}`
+        },
+        async (payload) => {
+          if (payload.new.user_id === userId) {
+            console.log('Ignoring own signal');
+            return;
+          }
 
-        if (signal.type === 'offer') {
-          console.log('Processing offer');
-          await peerConnection.setRemoteDescription(new RTCSessionDescription(signal.offer));
-          console.log('Remote description set');
+          try {
+            const signal: Signal = JSON.parse(payload.new.payload);
+            console.log('Received signal:', signal.type, 'from:', payload.new.user_id);
 
-          const answer = await peerConnection.createAnswer();
-          await peerConnection.setLocalDescription(answer);
-          console.log('Local description (answer) set');
+            if (signal.sender === userId) {
+              console.log('Ignoring signal from self');
+              return;
+            }
 
-          const { error } = await supabase
-            .from('room_signals')
-            .insert({
-              room_id: roomId,
-              user_id: userId,
-              type: 'answer',
-              payload: JSON.stringify({
-                type: 'answer',
-                answer: answer
-              })
-            });
-          
-          if (error) throw error;
-          console.log('Answer sent successfully');
+            switch (signal.type) {
+              case 'offer':
+                console.log('Processing offer');
+                await pc.setRemoteDescription(new RTCSessionDescription(signal.payload));
+                console.log('Remote description set (offer)');
+                
+                const answer = await pc.createAnswer();
+                await pc.setLocalDescription(answer);
+                console.log('Local description set (answer)');
 
-        } else if (signal.type === 'answer') {
-          console.log('Processing answer');
-          await peerConnection.setRemoteDescription(new RTCSessionDescription(signal.answer));
-          console.log('Remote description set');
+                await supabase.from('room_signals').insert({
+                  room_id: roomId,
+                  user_id: userId,
+                  type: 'answer',
+                  payload: JSON.stringify({
+                    type: 'answer',
+                    sender: userId,
+                    payload: answer
+                  })
+                });
+                console.log('Answer sent');
+                break;
 
-        } else if (signal.type === 'ice-candidate') {
-          console.log('Processing ICE candidate');
-          if (signal.candidate) {
-            await peerConnection.addIceCandidate(new RTCIceCandidate(signal.candidate));
-            console.log('ICE candidate added');
+              case 'answer':
+                if (isCaller && pc.signalingState !== 'stable') {
+                  console.log('Processing answer');
+                  await pc.setRemoteDescription(new RTCSessionDescription(signal.payload));
+                  console.log('Remote description set (answer)');
+                }
+                break;
+
+              case 'ice-candidate':
+                if (signal.payload && pc.remoteDescription) {
+                  console.log('Adding ICE candidate');
+                  await pc.addIceCandidate(new RTCIceCandidate(signal.payload));
+                  console.log('ICE candidate added');
+                } else {
+                  console.log('Queuing ICE candidate');
+                }
+                break;
+            }
+          } catch (error) {
+            logError('Error processing signal', error);
           }
         }
-      } catch (error) {
-        logError('Error processing signal', error);
-      }
-    };
-
-    const pc = createPeerConnection();
-
-    console.log(`Subscribing to room channel: ${roomId}`);
-    const channel = supabase.channel(`room:${roomId}`);
-    
-    channel
-      .on('broadcast', { event: 'signal' }, (payload) => {
-        console.log('Received broadcast message:', payload);
-        handleSignal(payload);
-      })
+      )
       .subscribe((status) => {
         console.log('Subscription status:', status);
       });
 
     return () => {
-      console.log('Cleaning up peer connection and channel subscription');
+      console.log('Cleaning up peer connection and subscription');
+      subscription.unsubscribe();
       pc.close();
-      channel.unsubscribe();
     };
-  }, [localStream, roomId, userId]);
+  }, [localStream, roomId, userId, isCaller]);
 
   const createOffer = async () => {
     if (!peerConnection) {
@@ -243,26 +269,27 @@ const VideoCall: React.FC<VideoCallProps> = ({ roomId, userId }) => {
     }
 
     try {
+      setIsCaller(true);
       console.log('Creating offer');
       const offer = await peerConnection.createOffer();
       await peerConnection.setLocalDescription(offer);
-      console.log('Local description (offer) set');
+      console.log('Local description set (offer)');
 
-      const { error } = await supabase
-        .from('room_signals')
-        .insert({
-          room_id: roomId,
-          user_id: userId,
+      const { error } = await supabase.from('room_signals').insert({
+        room_id: roomId,
+        user_id: userId,
+        type: 'offer',
+        payload: JSON.stringify({
           type: 'offer',
-          payload: JSON.stringify({
-            type: 'offer',
-            offer: offer
-          })
-        });
+          sender: userId,
+          payload: offer
+        })
+      });
       
       if (error) throw error;
       console.log('Offer sent successfully');
     } catch (error) {
+      setIsCaller(false);
       logError('Error creating/sending offer', error);
     }
   };
@@ -282,7 +309,8 @@ const VideoCall: React.FC<VideoCallProps> = ({ roomId, userId }) => {
       ) : (
         <>
           <div className="connection-status mb-4">
-            Connection Status: {connectionState || 'Not connected'}
+            <span className="font-semibold">Status:</span> {connectionState || 'Not connected'}
+            {isCaller && <span className="ml-2">(Caller)</span>}
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div className="local-video relative">
