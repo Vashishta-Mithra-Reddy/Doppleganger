@@ -65,7 +65,6 @@ const VideoCall: React.FC<VideoCallProps> = ({ roomId, userId }) => {
 
       try {
         console.log('Requesting media permissions...');
-        
         if (!navigator?.mediaDevices) {
           throw new Error('mediaDevices API not available');
         }
@@ -157,15 +156,25 @@ const VideoCall: React.FC<VideoCallProps> = ({ roomId, userId }) => {
               room_id: roomId,
               user_id: userId,
               type: 'ice-candidate',
-              payload: JSON.stringify({
+              // Include a unique property (e.g., timestamp) to help avoid duplicates
+              payload: {
                 type: 'ice-candidate',
                 sender: userId,
-                payload: event.candidate
-              })
+                payload: event.candidate,
+                timestamp: Date.now(),
+              }
             });
             
-            if (error) throw error;
-            console.log('ICE candidate sent successfully');
+            if (error) {
+              // Ignore duplicate ICE candidate errors
+              if (error.message.includes('duplicate key value')) {
+                console.warn('Duplicate ICE candidate, ignoring.');
+              } else {
+                throw error;
+              }
+            } else {
+              console.log('ICE candidate sent successfully');
+            }
           } catch (error) {
             logError('Error sending ICE candidate', error);
           }
@@ -191,20 +200,29 @@ const VideoCall: React.FC<VideoCallProps> = ({ roomId, userId }) => {
           filter: `room_id=eq.${roomId}`
         },
         async (payload) => {
+          // If the payload column is a JSON type, it's already an object.
+          // Otherwise, if it's a string, you might need to parse it.
+          let signal: Signal;
+          try {
+            signal = typeof payload.new.payload === 'string'
+              ? JSON.parse(payload.new.payload)
+              : payload.new.payload;
+          } catch (parseError) {
+            logError('Error parsing signal payload', parseError);
+            return;
+          }
+
           if (payload.new.user_id === userId) {
             console.log('Ignoring own signal');
             return;
           }
 
+          if (signal.sender === userId) {
+            console.log('Ignoring signal from self');
+            return;
+          }
+
           try {
-            const signal: Signal = JSON.parse(payload.new.payload);
-            console.log('Received signal:', signal.type, 'from:', payload.new.user_id);
-
-            if (signal.sender === userId) {
-              console.log('Ignoring signal from self');
-              return;
-            }
-
             switch (signal.type) {
               case 'offer':
                 console.log('Processing offer');
@@ -219,11 +237,12 @@ const VideoCall: React.FC<VideoCallProps> = ({ roomId, userId }) => {
                   room_id: roomId,
                   user_id: userId,
                   type: 'answer',
-                  payload: JSON.stringify({
+                  payload: {
                     type: 'answer',
                     sender: userId,
-                    payload: answer
-                  })
+                    payload: answer,
+                    timestamp: Date.now(),
+                  }
                 });
                 console.log('Answer sent');
                 break;
@@ -245,6 +264,9 @@ const VideoCall: React.FC<VideoCallProps> = ({ roomId, userId }) => {
                   console.log('Queuing ICE candidate');
                 }
                 break;
+
+              default:
+                console.log('Unknown signal type:', signal.type);
             }
           } catch (error) {
             logError('Error processing signal', error);
@@ -279,11 +301,12 @@ const VideoCall: React.FC<VideoCallProps> = ({ roomId, userId }) => {
         room_id: roomId,
         user_id: userId,
         type: 'offer',
-        payload: JSON.stringify({
+        payload: {
           type: 'offer',
           sender: userId,
-          payload: offer
-        })
+          payload: offer,
+          timestamp: Date.now(),
+        }
       });
       
       if (error) throw error;
