@@ -129,9 +129,10 @@ export default function DashboardPage() {
   };
 
   return (
-    <div className="min-h-vh p-4">
-      <div className="max-w-4xl mx-auto">
-        <div className="flex items-center justify-center mb-8">
+    <div className="min-h-vh p-6 flex flex-col items-center">
+      <div className="max-w-4xl w-full">
+        {/* Find Doppelgänger Button */}
+        <div className="flex justify-center mb-8">
           <Button
             onClick={handleFindDoppleganger}
             disabled={isSearching}
@@ -141,17 +142,41 @@ export default function DashboardPage() {
             {isSearching ? (
               <span className="animate-pulse">🔍 Searching for your match...</span>
             ) : (
-              "Find your Doppelganger"
+              "Find your Doppelgänger"
             )}
           </Button>
         </div>
-        
+  
+        {/* Error Message */}
         {error && (
           <div className="mb-4 p-4 bg-destructive/10 text-destructive rounded-lg">
             {error}
           </div>
         )}
+  
+        {/* Subtle Decorative Elements */}
+        <div className="grid grid-cols-3 gap-4">
+          <div className="h-28 bg-muted rounded-lg shadow-sm"></div>
+          <div className="h-28 bg-muted rounded-lg shadow-sm"></div>
+          <div className="h-28 bg-muted rounded-lg shadow-sm"></div>
+        </div>
+  
+        {/* Minimalist Divider */}
+        <div className="my-8 border-t border-border"></div>
+  
+        {/* Soft UI Elements to Fill Space */}
+        <div className="grid grid-cols-2 gap-6">
+          <div className="h-20 bg-muted rounded-lg shadow-sm"></div>
+          <div className="h-20 bg-muted rounded-lg shadow-sm"></div>
+        </div>
+  
+        {/* Aesthetic Footer Element */}
+        <div className="mt-10 p-4 bg-muted/50 rounded-lg shadow-sm flex items-center justify-center mb-6">
+          <p className="text-sm text-muted-foreground">✨ Discover your twin in the digital world... ✨</p>
+        </div>
       </div>
     </div>
   );
+  
+  
 }

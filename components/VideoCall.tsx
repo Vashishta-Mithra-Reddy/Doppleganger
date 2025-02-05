@@ -325,7 +325,7 @@ const VideoCall: React.FC<VideoCallProps> = ({ roomId, userId }) => {
       ) : (
         <>
           <div className="connection-status mb-4">
-            <span className="font-semibold">Status:</span> {connectionState || 'Not connected'}
+            <span className="font-semibold">Status:</span> <span className='text-blue-800'>{connectionState || 'Not connected'}</span>
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div className="local-video relative">
