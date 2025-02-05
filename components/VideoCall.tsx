@@ -19,11 +19,12 @@ const VideoCall: React.FC<VideoCallProps> = ({ roomId, userId }) => {
   const [connectionState, setConnectionState] = useState<string>('');
   const [error, setError] = useState<string>('');
   const [isMediaSupported, setIsMediaSupported] = useState<boolean>(false);
-  // Tracks if an offer was received from the remote peer.
   const [hasReceivedOffer, setHasReceivedOffer] = useState<boolean>(false);
 
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
+  // Use a ref to hold queued ICE candidates until remote description is set.
+  const queuedIceCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
 
   const supabase = createClient();
 
@@ -39,7 +40,7 @@ const VideoCall: React.FC<VideoCallProps> = ({ roomId, userId }) => {
     setError(errorMessage);
   };
 
-  // Check for WebRTC support
+  // Check WebRTC support
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const hasUserMedia = !!(
@@ -48,36 +49,25 @@ const VideoCall: React.FC<VideoCallProps> = ({ roomId, userId }) => {
         (navigator as any)?.mozGetUserMedia ||
         (navigator as any)?.msGetUserMedia
       );
-
       setIsMediaSupported(hasUserMedia);
-
       if (!hasUserMedia) {
         setError('Your browser does not support video calls. Please use a modern browser like Chrome, Firefox, or Safari.');
       }
     }
   }, []);
 
-  // Initialize media stream
+  // Initialize local media stream
   useEffect(() => {
     const initializeLocalStream = async () => {
-      if (typeof window === 'undefined' || !isMediaSupported) {
-        return;
-      }
-
+      if (typeof window === 'undefined' || !isMediaSupported) return;
       try {
         console.log('Requesting media permissions...');
-        if (!navigator?.mediaDevices) {
-          throw new Error('mediaDevices API not available');
-        }
-
         const stream = await navigator.mediaDevices.getUserMedia({
           video: true,
           audio: true
         });
-        
         console.log('Media permissions granted, stream created');
         setLocalStream(stream);
-        
         if (localVideoRef.current) {
           localVideoRef.current.srcObject = stream;
           console.log('Local video stream connected to video element');
@@ -108,14 +98,27 @@ const VideoCall: React.FC<VideoCallProps> = ({ roomId, userId }) => {
     };
   }, [isMediaSupported]);
 
-  // Set up peer connection and realtime subscription
+  // Flush any queued ICE candidates
+  const flushQueuedCandidates = async (pc: RTCPeerConnection) => {
+    for (const candidate of queuedIceCandidatesRef.current) {
+      try {
+        await pc.addIceCandidate(new RTCIceCandidate(candidate));
+        console.log('Flushed ICE candidate:', candidate.candidate);
+      } catch (err) {
+        logError('Error flushing ICE candidate', err);
+      }
+    }
+    queuedIceCandidatesRef.current = [];
+  };
+
+  // Set up peer connection and Supabase subscription
   useEffect(() => {
     if (!localStream) return;
 
     const createPeerConnection = () => {
       console.log('Creating new RTCPeerConnection');
       const pc = new RTCPeerConnection({ iceServers });
-      
+
       pc.onconnectionstatechange = () => {
         console.log(`Connection state changed to: ${pc.connectionState}`);
         setConnectionState(pc.connectionState);
@@ -123,10 +126,6 @@ const VideoCall: React.FC<VideoCallProps> = ({ roomId, userId }) => {
 
       pc.oniceconnectionstatechange = () => {
         console.log(`ICE connection state: ${pc.iceConnectionState}`);
-      };
-
-      pc.onicegatheringstatechange = () => {
-        console.log(`ICE gathering state: ${pc.iceGatheringState}`);
       };
 
       pc.onsignalingstatechange = () => {
@@ -142,7 +141,6 @@ const VideoCall: React.FC<VideoCallProps> = ({ roomId, userId }) => {
         console.log('Received remote track', event.streams[0].id);
         const [stream] = event.streams;
         setRemoteStream(stream);
-        
         if (remoteVideoRef.current) {
           remoteVideoRef.current.srcObject = stream;
           console.log('Remote video stream connected to video element');
@@ -164,7 +162,6 @@ const VideoCall: React.FC<VideoCallProps> = ({ roomId, userId }) => {
                 timestamp: Date.now(),
               }
             });
-            
             if (error) {
               if (error.message.includes('duplicate key value')) {
                 console.warn('Duplicate ICE candidate, ignoring.');
@@ -186,7 +183,6 @@ const VideoCall: React.FC<VideoCallProps> = ({ roomId, userId }) => {
     const pc = createPeerConnection();
     setPeerConnection(pc);
 
-    // Set up Supabase realtime subscription
     console.log('Setting up realtime subscription...');
     const subscription = supabase
       .channel(`room:${roomId}`)
@@ -209,13 +205,8 @@ const VideoCall: React.FC<VideoCallProps> = ({ roomId, userId }) => {
             return;
           }
 
-          if (payload.new.user_id === userId) {
+          if (payload.new.user_id === userId || signal.sender === userId) {
             console.log('Ignoring own signal');
-            return;
-          }
-
-          if (signal.sender === userId) {
-            console.log('Ignoring signal from self');
             return;
           }
 
@@ -223,11 +214,11 @@ const VideoCall: React.FC<VideoCallProps> = ({ roomId, userId }) => {
             switch (signal.type) {
               case 'offer':
                 console.log('Processing incoming offer');
-                // Mark that we've received an offer so we don't auto-create one.
                 setHasReceivedOffer(true);
                 await pc.setRemoteDescription(new RTCSessionDescription(signal.payload));
                 console.log('Remote description set (offer)');
-                
+                await flushQueuedCandidates(pc);
+
                 const answer = await pc.createAnswer();
                 await pc.setLocalDescription(answer);
                 console.log('Local description set (answer)');
@@ -251,16 +242,19 @@ const VideoCall: React.FC<VideoCallProps> = ({ roomId, userId }) => {
                 if (pc.signalingState !== 'stable') {
                   await pc.setRemoteDescription(new RTCSessionDescription(signal.payload));
                   console.log('Remote description set (answer)');
+                  await flushQueuedCandidates(pc);
                 }
                 break;
 
               case 'ice-candidate':
-                if (signal.payload && pc.remoteDescription) {
+                // If remoteDescription is not yet set, queue the candidate.
+                if (signal.payload && !pc.remoteDescription) {
+                  console.log('Queuing ICE candidate');
+                  queuedIceCandidatesRef.current.push(signal.payload);
+                } else if (signal.payload) {
                   console.log('Adding ICE candidate');
                   await pc.addIceCandidate(new RTCIceCandidate(signal.payload));
                   console.log('ICE candidate added');
-                } else {
-                  console.log('Queuing ICE candidate');
                 }
                 break;
 
@@ -276,7 +270,7 @@ const VideoCall: React.FC<VideoCallProps> = ({ roomId, userId }) => {
         console.log('Subscription status:', status);
       });
 
-    // After a delay, if no offer has been received, automatically create an offer.
+    // Auto-offer if no offer is received after a short delay.
     const autoOfferTimeout = setTimeout(async () => {
       if (!hasReceivedOffer && pc.signalingState === 'stable') {
         try {
@@ -318,7 +312,6 @@ const VideoCall: React.FC<VideoCallProps> = ({ roomId, userId }) => {
           {error}
         </div>
       )}
-      
       {!isMediaSupported ? (
         <div className="bg-yellow-100 border border-yellow-400 text-yellow-700 px-4 py-3 rounded mb-4">
           Your browser does not support video calls. Please use a modern browser like Chrome, Firefox, or Safari.
@@ -330,11 +323,11 @@ const VideoCall: React.FC<VideoCallProps> = ({ roomId, userId }) => {
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div className="local-video relative">
-              <video 
-                ref={localVideoRef} 
-                autoPlay 
-                muted 
-                playsInline 
+              <video
+                ref={localVideoRef}
+                autoPlay
+                muted
+                playsInline
                 className="w-full h-64 object-cover rounded-lg bg-gray-900"
               />
               <div className="absolute bottom-2 left-2 bg-black bg-opacity-50 text-white px-2 py-1 rounded">
@@ -342,10 +335,10 @@ const VideoCall: React.FC<VideoCallProps> = ({ roomId, userId }) => {
               </div>
             </div>
             <div className="remote-video relative">
-              <video 
-                ref={remoteVideoRef} 
-                autoPlay 
-                playsInline 
+              <video
+                ref={remoteVideoRef}
+                autoPlay
+                playsInline
                 className="w-full h-64 object-cover rounded-lg bg-gray-900"
               />
               <div className="absolute bottom-2 left-2 bg-black bg-opacity-50 text-white px-2 py-1 rounded">
@@ -353,7 +346,6 @@ const VideoCall: React.FC<VideoCallProps> = ({ roomId, userId }) => {
               </div>
             </div>
           </div>
-          {/* Start Call button removed; call initiation is automatic */}
         </>
       )}
     </div>
