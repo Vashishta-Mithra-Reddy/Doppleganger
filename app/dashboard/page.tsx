@@ -142,7 +142,7 @@ export default function DashboardPage() {
             {isSearching ? (
               <span className="animate-pulse">🔍 Searching for your match...</span>
             ) : (
-              "Find your Doppelgänger"
+              "Find a Sol !"
             )}
           </Button>
         </div>
