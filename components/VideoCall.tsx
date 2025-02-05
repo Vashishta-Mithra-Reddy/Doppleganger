@@ -168,6 +168,7 @@ const VideoCall: React.FC<VideoCallProps> = ({ roomId, userId }) => {
                   muted
                   playsInline
                   className="w-full h-full object-cover rounded-lg bg-gray-900"
+                  style={{ transform: "scaleX(-1)" }} // Flip the local video horizontally
                 />
                 <div className="absolute bottom-2 left-2 bg-black bg-opacity-50 text-white px-2 py-1 text-sm rounded">
                   You
@@ -179,6 +180,7 @@ const VideoCall: React.FC<VideoCallProps> = ({ roomId, userId }) => {
                   autoPlay
                   playsInline
                   className="w-full h-full object-cover rounded-lg bg-gray-900"
+                  style={{ transform: "scaleX(-1)" }}
                 />
                 <div className="absolute bottom-2 left-2 bg-black bg-opacity-50 text-white px-2 py-1 text-sm rounded">
                   Remote User
@@ -193,4 +195,3 @@ const VideoCall: React.FC<VideoCallProps> = ({ roomId, userId }) => {
 }
 
 export default VideoCall
-
