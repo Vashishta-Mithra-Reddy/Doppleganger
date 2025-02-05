@@ -119,7 +119,7 @@ const VideoCall: React.FC<VideoCallProps> = ({ roomId, userId }) => {
   }
 
   return (
-    <Card className="w-full max-w-4xl mx-auto">
+    <Card className="w-full h-full mx-auto">
       <CardContent className="p-6">
         {error && (
           <div className="flex items-center space-x-2 text-red-600 mb-4 p-3 bg-red-100 rounded-md">
