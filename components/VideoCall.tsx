@@ -15,19 +15,18 @@ interface Signal {
 const VideoCall: React.FC<VideoCallProps> = ({ roomId, userId }) => {
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
-  const [peerConnection, setPeerConnection] = useState<RTCPeerConnection | null>(null);
   const [connectionState, setConnectionState] = useState<string>('');
   const [error, setError] = useState<string>('');
   const [isMediaSupported, setIsMediaSupported] = useState<boolean>(false);
-  const [hasReceivedOffer, setHasReceivedOffer] = useState<boolean>(false);
 
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
-  // Use a ref to hold queued ICE candidates until remote description is set.
+  // Use refs so these values persist without triggering re-renders.
+  const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
+  const hasReceivedOfferRef = useRef<boolean>(false);
   const queuedIceCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
 
   const supabase = createClient();
-
   const iceServers = [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
@@ -40,7 +39,7 @@ const VideoCall: React.FC<VideoCallProps> = ({ roomId, userId }) => {
     setError(errorMessage);
   };
 
-  // Check WebRTC support
+  // Check for WebRTC (media) support
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const hasUserMedia = !!(
@@ -51,12 +50,14 @@ const VideoCall: React.FC<VideoCallProps> = ({ roomId, userId }) => {
       );
       setIsMediaSupported(hasUserMedia);
       if (!hasUserMedia) {
-        setError('Your browser does not support video calls. Please use a modern browser like Chrome, Firefox, or Safari.');
+        setError(
+          'Your browser does not support video calls. Please use a modern browser like Chrome, Firefox, or Safari.'
+        );
       }
     }
   }, []);
 
-  // Initialize local media stream
+  // Initialize the local media stream
   useEffect(() => {
     const initializeLocalStream = async () => {
       if (typeof window === 'undefined' || !isMediaSupported) return;
@@ -75,11 +76,14 @@ const VideoCall: React.FC<VideoCallProps> = ({ roomId, userId }) => {
       } catch (error: any) {
         let errorMessage = 'Error accessing media devices';
         if (error.name === 'NotAllowedError') {
-          errorMessage = 'Camera and microphone access was denied. Please allow access to use video calls.';
+          errorMessage =
+            'Camera and microphone access was denied. Please allow access to use video calls.';
         } else if (error.name === 'NotFoundError') {
-          errorMessage = 'No camera or microphone found. Please connect a device to use video calls.';
+          errorMessage =
+            'No camera or microphone found. Please connect a device to use video calls.';
         } else if (error.name === 'NotReadableError') {
-          errorMessage = 'Your camera or microphone is already in use by another application.';
+          errorMessage =
+            'Your camera or microphone is already in use by another application.';
         }
         logError(errorMessage, error);
       }
@@ -91,7 +95,7 @@ const VideoCall: React.FC<VideoCallProps> = ({ roomId, userId }) => {
 
     return () => {
       console.log('Cleaning up local stream');
-      localStream?.getTracks().forEach(track => {
+      localStream?.getTracks().forEach((track) => {
         track.stop();
         console.log(`Stopped track: ${track.kind}`);
       });
@@ -111,79 +115,75 @@ const VideoCall: React.FC<VideoCallProps> = ({ roomId, userId }) => {
     queuedIceCandidatesRef.current = [];
   };
 
-  // Set up peer connection and Supabase subscription
+  // Set up peer connection and realtime subscription once localStream is ready.
   useEffect(() => {
     if (!localStream) return;
 
-    const createPeerConnection = () => {
-      console.log('Creating new RTCPeerConnection');
-      const pc = new RTCPeerConnection({ iceServers });
+    // Create the RTCPeerConnection once.
+    const pc = new RTCPeerConnection({ iceServers });
+    peerConnectionRef.current = pc;
 
-      pc.onconnectionstatechange = () => {
-        console.log(`Connection state changed to: ${pc.connectionState}`);
-        setConnectionState(pc.connectionState);
-      };
-
-      pc.oniceconnectionstatechange = () => {
-        console.log(`ICE connection state: ${pc.iceConnectionState}`);
-      };
-
-      pc.onsignalingstatechange = () => {
-        console.log(`Signaling state: ${pc.signalingState}`);
-      };
-
-      localStream.getTracks().forEach(track => {
-        pc.addTrack(track, localStream);
-        console.log(`Added local track: ${track.kind}`);
-      });
-
-      pc.ontrack = (event) => {
-        console.log('Received remote track', event.streams[0].id);
-        const [stream] = event.streams;
-        setRemoteStream(stream);
-        if (remoteVideoRef.current) {
-          remoteVideoRef.current.srcObject = stream;
-          console.log('Remote video stream connected to video element');
-        }
-      };
-
-      pc.onicecandidate = async (event) => {
-        if (event.candidate) {
-          console.log('New ICE candidate:', event.candidate.candidate);
-          try {
-            const { error } = await supabase.from('room_signals').insert({
-              room_id: roomId,
-              user_id: userId,
-              type: 'ice-candidate',
-              payload: {
-                type: 'ice-candidate',
-                sender: userId,
-                payload: event.candidate,
-                timestamp: Date.now(),
-              }
-            });
-            if (error) {
-              if (error.message.includes('duplicate key value')) {
-                console.warn('Duplicate ICE candidate, ignoring.');
-              } else {
-                throw error;
-              }
-            } else {
-              console.log('ICE candidate sent successfully');
-            }
-          } catch (err) {
-            logError('Error sending ICE candidate', err);
-          }
-        }
-      };
-
-      return pc;
+    pc.onconnectionstatechange = () => {
+      console.log(`Connection state changed to: ${pc.connectionState}`);
+      setConnectionState(pc.connectionState);
     };
 
-    const pc = createPeerConnection();
-    setPeerConnection(pc);
+    pc.oniceconnectionstatechange = () => {
+      console.log(`ICE connection state: ${pc.iceConnectionState}`);
+    };
+
+    pc.onsignalingstatechange = () => {
+      console.log(`Signaling state: ${pc.signalingState}`);
+    };
+
+    // Add all local tracks.
+    localStream.getTracks().forEach((track) => {
+      pc.addTrack(track, localStream);
+      console.log(`Added local track: ${track.kind}`);
+    });
+
+    pc.ontrack = (event) => {
+      console.log('Received remote track', event.streams[0].id);
+      const [stream] = event.streams;
+      setRemoteStream(stream);
+      if (remoteVideoRef.current) {
+        remoteVideoRef.current.srcObject = stream;
+        console.log('Remote video stream connected to video element');
+      }
+    };
+
+    pc.onicecandidate = async (event) => {
+      if (event.candidate) {
+        console.log('New ICE candidate:', event.candidate.candidate);
+        try {
+          const { error } = await supabase.from('room_signals').insert({
+            room_id: roomId,
+            user_id: userId,
+            type: 'ice-candidate',
+            payload: {
+              type: 'ice-candidate',
+              sender: userId,
+              payload: event.candidate,
+              timestamp: Date.now()
+            }
+          });
+          if (error) {
+            if (error.message.includes('duplicate key value')) {
+              console.warn('Duplicate ICE candidate, ignoring.');
+            } else {
+              throw error;
+            }
+          } else {
+            console.log('ICE candidate sent successfully');
+          }
+        } catch (err) {
+          logError('Error sending ICE candidate', err);
+        }
+      }
+    };
 
     console.log('Setting up realtime subscription...');
+    // Subscribe to Supabase realtime updates.
     const subscription = supabase
       .channel(`room:${roomId}`)
       .on(
@@ -197,14 +197,16 @@ const VideoCall: React.FC<VideoCallProps> = ({ roomId, userId }) => {
         async (payload) => {
           let signal: Signal;
           try {
-            signal = typeof payload.new.payload === 'string'
-              ? JSON.parse(payload.new.payload)
-              : payload.new.payload;
+            signal =
+              typeof payload.new.payload === 'string'
+                ? JSON.parse(payload.new.payload)
+                : payload.new.payload;
           } catch (parseError) {
             logError('Error parsing signal payload', parseError);
             return;
           }
 
+          // Ignore our own signals.
           if (payload.new.user_id === userId || signal.sender === userId) {
             console.log('Ignoring own signal');
             return;
@@ -214,15 +216,13 @@ const VideoCall: React.FC<VideoCallProps> = ({ roomId, userId }) => {
             switch (signal.type) {
               case 'offer':
                 console.log('Processing incoming offer');
-                setHasReceivedOffer(true);
+                hasReceivedOfferRef.current = true;
                 await pc.setRemoteDescription(new RTCSessionDescription(signal.payload));
                 console.log('Remote description set (offer)');
                 await flushQueuedCandidates(pc);
-
                 const answer = await pc.createAnswer();
                 await pc.setLocalDescription(answer);
                 console.log('Local description set (answer)');
-
                 await supabase.from('room_signals').insert({
                   room_id: roomId,
                   user_id: userId,
@@ -231,12 +231,11 @@ const VideoCall: React.FC<VideoCallProps> = ({ roomId, userId }) => {
                     type: 'answer',
                     sender: userId,
                     payload: answer,
-                    timestamp: Date.now(),
+                    timestamp: Date.now()
                   }
                 });
                 console.log('Answer sent');
                 break;
-
               case 'answer':
                 console.log('Processing answer');
                 if (pc.signalingState !== 'stable') {
@@ -245,9 +244,7 @@ const VideoCall: React.FC<VideoCallProps> = ({ roomId, userId }) => {
                   await flushQueuedCandidates(pc);
                 }
                 break;
-
               case 'ice-candidate':
-                // If remoteDescription is not yet set, queue the candidate.
                 if (signal.payload && !pc.remoteDescription) {
                   console.log('Queuing ICE candidate');
                   queuedIceCandidatesRef.current.push(signal.payload);
@@ -257,7 +254,6 @@ const VideoCall: React.FC<VideoCallProps> = ({ roomId, userId }) => {
                   console.log('ICE candidate added');
                 }
                 break;
-
               default:
                 console.log('Unknown signal type:', signal.type);
             }
@@ -270,15 +266,14 @@ const VideoCall: React.FC<VideoCallProps> = ({ roomId, userId }) => {
         console.log('Subscription status:', status);
       });
 
-    // Auto-offer if no offer is received after a short delay.
+    // Auto-create an offer if none is received within 1 second.
     const autoOfferTimeout = setTimeout(async () => {
-      if (!hasReceivedOffer && pc.signalingState === 'stable') {
+      if (!hasReceivedOfferRef.current && pc.signalingState === 'stable') {
         try {
           console.log('No incoming offer detected. Creating offer automatically.');
           const offer = await pc.createOffer();
           await pc.setLocalDescription(offer);
           console.log('Local description set (offer)');
-
           await supabase.from('room_signals').insert({
             room_id: roomId,
             user_id: userId,
@@ -287,7 +282,7 @@ const VideoCall: React.FC<VideoCallProps> = ({ roomId, userId }) => {
               type: 'offer',
               sender: userId,
               payload: offer,
-              timestamp: Date.now(),
+              timestamp: Date.now()
             }
           });
           console.log('Offer sent successfully');
@@ -303,7 +298,7 @@ const VideoCall: React.FC<VideoCallProps> = ({ roomId, userId }) => {
       subscription.unsubscribe();
       pc.close();
     };
-  }, [localStream, roomId, userId, hasReceivedOffer]);
+  }, [localStream, roomId, userId]);
 
   return (
     <div className="video-call-container p-4">
