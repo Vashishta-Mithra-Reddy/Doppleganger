@@ -1,10 +1,11 @@
-import { useState } from "react"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Textarea } from "@/components/ui/textarea"
-import { Label } from "@/components/ui/label"
-import type { ProfileFormData } from "@/types/user"
-import type React from "react" // Added import for React
+import { useState } from "react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
+import type { ProfileFormData } from "@/types/user";
+import type React from "react";
+import { classifyInterests } from "@/utils/classifyInterests"; // Import classifyInterests utility
 
 interface ProfileFormProps {
   onSubmit: (data: ProfileFormData) => void;
@@ -28,9 +29,17 @@ export function ProfileForm({ onSubmit }: ProfileFormProps) {
     setFormData(prev => ({ ...prev, hobbies }));
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    onSubmit(formData);
+
+    // Classify the interests before submitting the form data
+    const categorizedInterests = await classifyInterests(formData.interests);
+
+    // Update form data with categorized interests
+    const updatedFormData = { ...formData, interests: categorizedInterests };
+
+    // Submit the updated form data
+    onSubmit(updatedFormData);
   };
 
   return (
@@ -39,6 +48,7 @@ export function ProfileForm({ onSubmit }: ProfileFormProps) {
       className="space-y-6 p-6 rounded-lg w-2/6 mx-auto border border-input min-w-1/6"
     >
       <p className="font-semibold text-center border-b-2 pb-4 text-md">Tell us more about you</p>
+      
       <div className="space-y-2">
         <Label htmlFor="full_name">Name<span className="text-red-500"> *</span></Label>
         <Input
@@ -87,7 +97,5 @@ export function ProfileForm({ onSubmit }: ProfileFormProps) {
         Complete Profile
       </Button>
     </form>
-  )
-} 
-
-
+  );
+}
