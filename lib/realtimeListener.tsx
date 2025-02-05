@@ -93,7 +93,7 @@ const createConversation = async (user1: any, user2: any, supabase: any) => {
       // ✨ Create new conversation
       const { data: conversation, error } = await supabase
         .from("conversations")
-        .insert([{ participant_ids: userIds, active: true }]) // ✅ Insert as uuid[]
+        .insert([{ participant_ids: userIds}]) // ✅ Insert as uuid[]
         .select()
         .single();
   

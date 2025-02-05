@@ -57,52 +57,52 @@ export default function RoomClientPage() {
 
     fetchData()
   }, [roomId])
-  useEffect(() => {
-    let channel: any = null;
+  // useEffect(() => {
+  //   let channel: any = null;
   
-    const handleSubscription = async () => {
-      // Create a dedicated channel for this subscription
-      channel = supabase
-        .channel('conversation-updates')
-        .on(
-          'postgres_changes',
-          {
-            event: 'UPDATE',
-            schema: 'public',
-            table: 'conversations',
-            filter: `id=eq.${roomId}`,
-          },
-          (payload) => {
-            if (payload.new.active === false) {
-              router.push("/dashboard");
-            }
-          }
-        )
-        .subscribe((status, err) => {
-          if (err) {
-            console.error('Subscription error:', err);
-            return;
-          }
-          console.log('Subscription status:', status);
-        });
+  //   const handleSubscription = async () => {
+  //     // Create a dedicated channel for this subscription
+  //     channel = supabase
+  //       .channel('conversation-updates')
+  //       .on(
+  //         'postgres_changes',
+  //         {
+  //           event: 'UPDATE',
+  //           schema: 'public',
+  //           table: 'conversations',
+  //           filter: `id=eq.${roomId}`,
+  //         },
+  //         (payload) => {
+  //           if (payload.new.active === false) {
+  //             router.push("/dashboard");
+  //           }
+  //         }
+  //       )
+  //       .subscribe((status, err) => {
+  //         if (err) {
+  //           console.error('Subscription error:', err);
+  //           return;
+  //         }
+  //         console.log('Subscription status:', status);
+  //       });
   
-      if (channel) return channel;
-    };
+  //     if (channel) return channel;
+  //   };
   
-    handleSubscription();
+  //   handleSubscription();
   
-    return ;
-  }, [roomId, router]);
+  //   return ;
+  // }, [roomId, router]);
 
   const handleLeaveRoom = async () => {
-    const { error } = await supabase
-      .from('conversations')
-      .update({ active: false })
-      .eq('id', roomId);
+    // const { error } = await supabase
+    //   .from('conversations')
+    //   .update({ active: false })
+    //   .eq('id', roomId);
   
-    if (!error) {
+    // if (!error) {
       router.push("/dashboard");
-    }
+    // }
   };
 
   if (loading)
