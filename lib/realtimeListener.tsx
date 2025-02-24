@@ -55,74 +55,58 @@ const findMatchingUsers = async (user: any, supabase: any) => {
 };
 
 const createConversation = async (user1: any, user2: any, supabase: any) => {
-    const userIds = [user1.user_id, user2.user_id].sort(); // Ensure ordered UUID array
-  
-    try {
-      // 🔍 Check if a conversation already exists
-      const { data: existingConversation, error: checkError } = await supabase
-        .from("conversations")
-        .select("id")
-        .contains("participant_ids", userIds) 
-        .maybeSingle();
-  
-      if (checkError) {
-        console.error("Error checking existing conversation:", checkError);
-        return;
+  const userIds = [user1.user_id, user2.user_id].sort();
+
+  try {
+      // 1️⃣ First attempt to insert conversation
+      const { data: newConversation, error: insertError } = await supabase
+          .from("conversations")
+          .insert([{ participant_ids: userIds }])
+          .select()
+          .single();
+
+      let conversationId: string;
+
+      if (insertError) {
+          // 2️⃣ Handle unique constraint violation
+          if (insertError.code === '23505') {
+              // Fetch existing conversation
+              const { data: existingConversation, error: fetchError } = await supabase
+                  .from("conversations")
+                  .select("id")
+                  .eq("participant_ids", userIds)
+                  .single();
+
+              if (fetchError) throw fetchError;
+              conversationId = existingConversation.id;
+              console.log("Existing conversation found:", conversationId);
+          } else {
+              throw insertError;
+          }
+      } else {
+          // 3️⃣ New conversation created successfully
+          conversationId = newConversation.id;
+          console.log("New conversation created:", conversationId);
       }
-  
-      if (existingConversation) {
-        console.log("Conversation already exists:", existingConversation.id);
-        const [update1, update2] = await Promise.all([
-            supabase
-              .from("profiles")
-              .update({ status: "busy" })
-              .eq("user_id", user1.user_id), // Changed from 'id' to 'user_id'
-            supabase
-              .from("profiles")
-              .update({ status: "busy" })
-              .eq("user_id", user2.user_id)  // Changed from 'id' to 'user_id'
-          ]);
-      
-          // Check for update errors
-          if (update1.error) throw new Error(`User 1 update failed: ${update1.error.message}`);
-          if (update2.error) throw new Error(`User 2 update failed: ${update2.error.message}`);
-        await notifyUsers(existingConversation.id, userIds[0], userIds[1], supabase);
-        return;
-      }
-  
-      // ✨ Create new conversation
-      const { data: conversation, error } = await supabase
-        .from("conversations")
-        .insert([{ participant_ids: userIds }]) // ✅ Insert as uuid[]
-        .select()
-        .single();
-  
-      if (error) throw error;
-  
+
+      // 4️⃣ Update user statuses
       const [update1, update2] = await Promise.all([
-        supabase
-          .from("profiles")
-          .update({ status: "busy" })
-          .eq("user_id", user1.user_id), // Changed from 'id' to 'user_id'
-        supabase
-          .from("profiles")
-          .update({ status: "busy" })
-          .eq("user_id", user2.user_id)  // Changed from 'id' to 'user_id'
+          supabase.from("profiles").update({ status: "busy" }).eq("user_id", user1.user_id),
+          supabase.from("profiles").update({ status: "busy" }).eq("user_id", user2.user_id)
       ]);
-  
-      // Check for update errors
+
       if (update1.error) throw new Error(`User 1 update failed: ${update1.error.message}`);
       if (update2.error) throw new Error(`User 2 update failed: ${update2.error.message}`);
-  
-      // 🔔 Notify users
-      await notifyUsers(conversation.id, userIds[0], userIds[1], supabase);
-      console.log(`✅ Conversation ${conversation.id} created successfully`);
-  
-    } catch (error) {
-      console.error("🚨 Error creating conversation:", JSON.stringify(error, null, 2));
-    }
-  };
-  
+
+      // 5️⃣ Notify users
+      await notifyUsers(conversationId, userIds[0], userIds[1], supabase);
+      return conversationId;
+
+  } catch (error) {
+      console.error("Error in createConversation:", error);
+      throw error;
+  }
+};
 // Notify both users about the match
 const notifyUsers = async (conversationId: string, userId1: string, userId2: string, supabase: any) => {
     // Send to each user's specific channel
