@@ -57,8 +57,12 @@ export const updateSession = async (request: NextRequest) => {
       return NextResponse.redirect(new URL('/dashboard', request.url));
     }
 
+    if (request.nextUrl.pathname === '/' && (!userx.error && !profile)) {
+      return NextResponse.redirect(new URL('/profile-setup', request.url));
+    }
+
     if (request.nextUrl.pathname === '/profile-setup' && profile) {
-      return NextResponse.redirect(new URL('/', request.url));
+      return NextResponse.redirect(new URL('/dashboard', request.url));
     }
 
     if (request.nextUrl.pathname === "/sign-up" && !userx.error) {
