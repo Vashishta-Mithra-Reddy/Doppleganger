@@ -120,13 +120,11 @@ export default function RoomClientPage() {
           <X className="h-4 w-4" />
         </Button>
       </div>
-      <div className="flex flex-1 overflow-hidden">
-        <div className="w-[70%] p-4 border-r">
-          {/* <h2 className="text-2xl font-bold mb-4">Welcome to the Chat Room</h2>
-          <p>This is the main content area. You can add any additional features or information here.</p> */}
-          <VideoCall roomId={roomId as string} userId={userId as string}/>
+      <div className="flex flex-1 overflow-hidden flex-col md:flex-row">
+        <div className="w-full md:w-[70%] p-4 border-b md:border-r md:border-b-0">
+          <VideoCall roomId={roomId as string} userId={userId as string} />
         </div>
-        <div className="w-[30%]">
+        <div className="w-full md:w-[30%]">
           {userId && participants.length === 2 && (
             <ChatComponent conversationId={roomId as string} userId={userId} participants={participants} />
           )}
