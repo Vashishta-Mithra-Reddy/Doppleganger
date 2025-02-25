@@ -36,7 +36,7 @@ export default function RoomClientPage() {
         await supabase
           .from("profiles")
           .update({ status: "busy" })
-          .eq("id", user.id)
+          .eq("user_id", user.id)
         console.log("updated the status to busy");
 
         const { data: conversation, error: convError } = await supabase
