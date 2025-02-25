@@ -5,10 +5,12 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import type { ProfileFormData } from "@/types/user";
 import type React from "react";
+import { Loader2 } from "lucide-react";
 
 interface ProfileFormProps {
-  onSubmit: (data: ProfileFormData) => void;
+  onSubmit: (data: ProfileFormData, setSubmitting: (state: boolean) => void) => void;
 }
+
 
 export function ProfileForm({ onSubmit }: ProfileFormProps) {
   const [formData, setFormData] = useState<ProfileFormData>({
@@ -17,6 +19,7 @@ export function ProfileForm({ onSubmit }: ProfileFormProps) {
     interests: [],
     hobbies: [],
   });
+  const [loading, setLoading] = useState(false);
 
   const handleInterestsChange = (value: string) => {
     const interests = value.split(',').map(i => i.trim()).filter(Boolean);
@@ -30,7 +33,9 @@ export function ProfileForm({ onSubmit }: ProfileFormProps) {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    onSubmit(formData);
+    setLoading(true);
+    await onSubmit(formData, setLoading);
+    // setLoading(false);
   };
 
   return (
@@ -84,8 +89,8 @@ export function ProfileForm({ onSubmit }: ProfileFormProps) {
         />
       </div>
 
-      <Button type="submit" className="w-full">
-        Complete Profile
+      <Button type="submit" className="w-full flex items-center justify-center gap-2" disabled={loading}>
+        {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : "Complete Profile"}
       </Button>
     </form>
   );
