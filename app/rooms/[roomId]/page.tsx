@@ -124,7 +124,7 @@ export default function RoomClientPage() {
         <div className="w-full md:w-[70%] p-4 border-b md:border-r md:border-b-0">
           <VideoCall roomId={roomId as string} userId={userId as string} />
         </div>
-        <div className="w-[95%] md:w-[30%] md:pr-0 max-h-[40%] md:max-h-[100%]">
+        <div className="w-[95%] md:w-[30%] md:pr-0 max-h-[49%] md:max-h-[100%]">
           {userId && participants.length === 2 && (
             <ChatComponent conversationId={roomId as string} userId={userId} participants={participants} />
           )}
