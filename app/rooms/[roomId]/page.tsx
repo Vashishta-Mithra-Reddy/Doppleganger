@@ -120,11 +120,11 @@ export default function RoomClientPage() {
           <X className="h-4 w-4" />
         </Button>
       </div>
-      <div className="flex flex-1 overflow-hidden flex-col md:flex-row">
+      <div className="flex flex-1 overflow-hidden flex-col md:flex-row items-center md:items-stretch">
         <div className="w-full md:w-[70%] p-4 border-b md:border-r md:border-b-0">
           <VideoCall roomId={roomId as string} userId={userId as string} />
         </div>
-        <div className="w-full md:w-[30%]">
+        <div className="w-[99%] md:w-[30%] md:pr-0">
           {userId && participants.length === 2 && (
             <ChatComponent conversationId={roomId as string} userId={userId} participants={participants} />
           )}
