@@ -6,6 +6,7 @@ import { useParams, useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { X } from "lucide-react"
 import dynamic from "next/dynamic"
+
 const VideoCall = dynamic(() => import('@/components/VideoCall'), {
   ssr: false
 });
@@ -30,6 +31,12 @@ export default function RoomClientPage() {
         } = await supabase.auth.getUser()
         if (userError || !user) throw new Error("Not authenticated")
         setUserId(user.id)
+
+        // Update status to "busy" when the user enters the room
+        await supabase
+          .from("profiles")
+          .update({ status: "busy" })
+          .eq("id", user.id)
 
         const { data: conversation, error: convError } = await supabase
           .from("conversations")
@@ -56,54 +63,35 @@ export default function RoomClientPage() {
     }
 
     fetchData()
-  }, [roomId])
-  // useEffect(() => {
-  //   let channel: any = null;
-  
-  //   const handleSubscription = async () => {
-  //     // Create a dedicated channel for this subscription
-  //     channel = supabase
-  //       .channel('conversation-updates')
-  //       .on(
-  //         'postgres_changes',
-  //         {
-  //           event: 'UPDATE',
-  //           schema: 'public',
-  //           table: 'conversations',
-  //           filter: `id=eq.${roomId}`,
-  //         },
-  //         (payload) => {
-  //           if (payload.new.active === false) {
-  //             router.push("/dashboard");
-  //           }
-  //         }
-  //       )
-  //       .subscribe((status, err) => {
-  //         if (err) {
-  //           console.error('Subscription error:', err);
-  //           return;
-  //         }
-  //         console.log('Subscription status:', status);
-  //       });
-  
-  //     if (channel) return channel;
-  //   };
-  
-  //   handleSubscription();
-  
-  //   return ;
-  // }, [roomId, router]);
+
+    // Set status to "idle" when user leaves the page
+    const handleBeforeUnload = async () => {
+      if (userId) {
+        await supabase
+          .from("profiles")
+          .update({ status: "idle" })
+          .eq("id", userId)
+      }
+    }
+
+    window.addEventListener("beforeunload", handleBeforeUnload)
+    return () => {
+      handleBeforeUnload() // Ensure status updates even if component unmounts
+      window.removeEventListener("beforeunload", handleBeforeUnload)
+    }
+  }, [roomId, userId])
 
   const handleLeaveRoom = async () => {
-    // const { error } = await supabase
-    //   .from('conversations')
-    //   .update({ active: false })
-    //   .eq('id', roomId);
-  
-    // if (!error) {
-      router.push("/dashboard");
-    // }
-  };
+    // Update status to idle before leaving
+    if (userId) {
+      await supabase
+        .from("profiles")
+        .update({ status: "idle" })
+        .eq("id", userId)
+    }
+
+    router.push("/dashboard")
+  }
 
   if (loading)
     return <div className="fixed inset-0 flex items-center justify-center bg-background">Loading conversation...</div>
@@ -133,4 +121,3 @@ export default function RoomClientPage() {
     </div>
   )
 }
-
