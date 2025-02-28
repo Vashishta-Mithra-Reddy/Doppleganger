@@ -47,7 +47,7 @@ export async function POST(req: NextRequest) {
     }
 
     const vector = response.embeddings.float[0]; // First text’s float embedding
-    console.log(vector);
+    // console.log(vector);
     return NextResponse.json({ vector });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "An unknown error occurred";

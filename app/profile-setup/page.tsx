@@ -70,6 +70,7 @@ export default function ProfileSetup() {
       }
 
       const vector = await response.json();
+      console.log(`Vector Created: ${vector}`);
 
       const { error } = await supabase.from("profiles").insert({
         user_id: user.id,
