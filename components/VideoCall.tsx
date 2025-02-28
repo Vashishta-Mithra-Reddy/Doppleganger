@@ -98,10 +98,10 @@ const VideoCall: React.FC<VideoCallProps> = ({ roomId, userId }) => {
     }
 
     return () => {
-      console.log('Cleaning up local stream');
+      // console.log('Cleaning up local stream');
       localStream?.getTracks().forEach((track) => {
         track.stop();
-        console.log(`Stopped track: ${track.kind}`);
+        // console.log(`Stopped track: ${track.kind}`);
       });
     };
   }, [isMediaSupported]);
@@ -111,7 +111,7 @@ const VideoCall: React.FC<VideoCallProps> = ({ roomId, userId }) => {
     for (const candidate of queuedIceCandidatesRef.current) {
       try {
         await pc.addIceCandidate(new RTCIceCandidate(candidate));
-        console.log('Flushed ICE candidate:', candidate.candidate);
+        // console.log('Flushed ICE candidate:', candidate.candidate);
       } catch (err) {
         logError('Error flushing ICE candidate', err);
       }
@@ -134,26 +134,26 @@ const VideoCall: React.FC<VideoCallProps> = ({ roomId, userId }) => {
     peerConnectionRef.current = pc;
 
     pc.onconnectionstatechange = () => {
-      console.log(`Connection state changed to: ${pc.connectionState}`);
+      // console.log(`Connection state changed to: ${pc.connectionState}`);
       setConnectionState(pc.connectionState);
     };
 
     pc.oniceconnectionstatechange = () => {
-      console.log(`ICE connection state: ${pc.iceConnectionState}`);
+      // console.log(`ICE connection state: ${pc.iceConnectionState}`);
     };
 
     pc.onsignalingstatechange = () => {
-      console.log(`Signaling state: ${pc.signalingState}`);
+      // console.log(`Signaling state: ${pc.signalingState}`);
     };
 
     // Attach negotiationneeded handler.
     pc.onnegotiationneeded = async () => {
       try {
         makingOfferRef.current = true;
-        console.log('Negotiation needed: creating offer');
+        // console.log('Negotiation needed: creating offer');
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
-        console.log('Local description set (offer)');
+        // console.log('Local description set (offer)');
         await supabase.from('room_signals').insert({
           room_id: roomId,
           user_id: userId,
@@ -190,7 +190,7 @@ const VideoCall: React.FC<VideoCallProps> = ({ roomId, userId }) => {
 
     pc.onicecandidate = async (event) => {
       if (event.candidate) {
-        console.log('New ICE candidate:', event.candidate.candidate);
+        // console.log('New ICE candidate:', event.candidate.candidate);
         try {
           const { error } = await supabase.from('room_signals').insert({
             room_id: roomId,
@@ -210,7 +210,7 @@ const VideoCall: React.FC<VideoCallProps> = ({ roomId, userId }) => {
               throw error;
             }
           } else {
-            console.log('ICE candidate sent successfully');
+            // console.log('ICE candidate sent successfully');
           }
         } catch (err) {
           logError('Error sending ICE candidate', err);
@@ -218,7 +218,7 @@ const VideoCall: React.FC<VideoCallProps> = ({ roomId, userId }) => {
       }
     };
 
-    console.log('Setting up realtime subscription...');
+    // console.log('Setting up realtime subscription...');
     const subscription = supabase
       .channel(`room:${roomId}`)
       .on(
@@ -243,7 +243,7 @@ const VideoCall: React.FC<VideoCallProps> = ({ roomId, userId }) => {
 
           // Ignore our own signals.
           if (payload.new.user_id === userId || signal.sender === userId) {
-            console.log('Ignoring own signal');
+            // console.log('Ignoring own signal');
             return;
           }
 
@@ -254,16 +254,16 @@ const VideoCall: React.FC<VideoCallProps> = ({ roomId, userId }) => {
                 makingOfferRef.current || pc.signalingState !== 'stable';
               // If we are not polite and a collision is detected, ignore the incoming offer.
               if (offerCollision && !isPolite.current) {
-                console.log('Ignoring colliding offer (impolite peer)');
+                // console.log('Ignoring colliding offer (impolite peer)');
                 return;
               }
-              console.log('Processing incoming offer');
+              // console.log('Processing incoming offer');
               await pc.setRemoteDescription(new RTCSessionDescription(signal.payload));
-              console.log('Remote description set (offer)');
+              // console.log('Remote description set (offer)');
               await flushQueuedCandidates(pc);
               const answer = await pc.createAnswer();
               await pc.setLocalDescription(answer);
-              console.log('Local description set (answer)');
+              // console.log('Local description set (answer)');
               await supabase.from('room_signals').insert({
                 room_id: roomId,
                 user_id: userId,
@@ -275,12 +275,12 @@ const VideoCall: React.FC<VideoCallProps> = ({ roomId, userId }) => {
                   timestamp: Date.now()
                 }
               });
-              console.log('Answer sent');
+              // console.log('Answer sent');
             } else if (signal.type === 'answer') {
               console.log('Processing answer');
               if (pc.signalingState !== 'stable') {
                 await pc.setRemoteDescription(new RTCSessionDescription(signal.payload));
-                console.log('Remote description set (answer)');
+                // console.log('Remote description set (answer)');
                 await flushQueuedCandidates(pc);
               }
             } else if (signal.type === 'ice-candidate') {

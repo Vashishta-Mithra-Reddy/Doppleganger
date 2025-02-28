@@ -43,7 +43,7 @@ const tryMatchingUser = async (user: any, supabase: any, retries = 5) => {
       await createConversation(user, matchedUser, supabase);
       return; // Stop retrying if a match is found
     }
-    console.log(`No match found. Retrying in 2 seconds... (${i + 1}/${retries})`);
+    // console.log(`No match found. Retrying in 2 seconds... (${i + 1}/${retries})`);
     await new Promise((resolve) => setTimeout(resolve, 2000)); // Wait 2 seconds before retrying
   }
 };
